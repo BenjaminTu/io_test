@@ -330,7 +330,7 @@ static PyObject *method_test_io(PyObject *self, PyObject *args) {
     printf("buffer from c: %s\n", d);
     aws_crt_input_stream_read(b, d, 4);
     printf("buffer from c: %s\n", d);
-    
+
     Py_RETURN_NONE;
 }
 
@@ -343,10 +343,6 @@ static PyMethodDef input_stream_methods[] = {
     {"aws_crt_input_stream_options_set_destroy", method_aws_crt_input_stream_options_set_destroy, METH_VARARGS, ""},
     {"aws_crt_input_stream_new", method_aws_crt_input_stream_new, METH_VARARGS, ""},
     {"aws_crt_input_stream_release", method_aws_crt_input_stream_release, METH_VARARGS, ""},
-    {"aws_crt_input_stream_seek", method_aws_crt_input_stream_seek, METH_VARARGS, ""},
-    {"aws_crt_input_stream_read", method_aws_crt_input_stream_read, METH_VARARGS, ""},
-    {"aws_crt_input_stream_get_status", method_aws_crt_input_stream_get_status, METH_VARARGS, ""},
-    {"aws_crt_input_stream_get_length", method_aws_crt_input_stream_get_length, METH_VARARGS, ""},
     {"test_io", method_test_io, METH_VARARGS, ""},
     {NULL, NULL, 0, NULL}
 };
