@@ -13,24 +13,48 @@ class InputStream:
         self.i_stream = ist.aws_crt_input_stream_new(self.opt)
 
     def seek(self, offset, whence):
-        return self.stream.seek(offset, whence)
-        print("calling seek")
+        print("calling seek from python")
+        self.stream.seek(offset, whence)
 
     def read(self, m):
-        print("calling read")
+        print("calling read from python")
         data = self.stream.read(len(m))
         n = len(data)
         m[:n] = data
         return n
 
     def get_status(self):
-        print("calling get_status")
+        print("calling get_status from python")
 
     def get_length(self):
-        print("calling get_length")
+        print("calling get_length from python")
 
     def destroy(self):
-        print("calling destroy")
+        print("calling destroy from python")
+
+class MockPythonStream:
+    """For testing duck-typed stream classes.
+    Doesn't inherit from io.IOBase. Doesn't implement readinto()"""
+
+    def __init__(self, src_data):
+        self.data = bytes(src_data)
+        self.len = len(src_data)
+        self.pos = 0
+
+    def seek(self, where):
+        self.pos = where
+
+    def tell(self):
+        return self.pos
+
+    def read(self, amount=None):
+        if amount is None:
+            amount = self.len - self.pos
+        else:
+            amount = min(amount, self.len - self.pos)
+        prev_pos = self.pos
+        self.pos += amount
+        return self.data[prev_pos: self.pos]
 
 class InputStreamTest():
     def _test(self, python_stream, expected):
@@ -63,18 +87,15 @@ class InputStreamTest():
         self._test(python_stream, src_data)
 
 
+
+# read/seek test from python
 # test = InputStreamTest()
 # test.test_read_official_io()
 # test.test_read_duck_typed_io()
+
+
+# callback function test
 src_data = b'a long string here'
 python_stream = io.BytesIO(src_data)
 test = InputStream(python_stream)
-print(test.i_stream)
 ist.test_io(test.i_stream)
-
-# print(aws.aws_crt_init())
-# print(aws.aws_crt_clean_up())
-# print(aws.aws_crt_test_error(1))
-# print(aws.aws_crt_mem_acquire(2))
-# print(aws.aws_crt_mem_release(0x01234567))
-# print(aws.aws_crt_default_allocator())

@@ -12,56 +12,80 @@ typedef struct py_stream_vtable {
 
 typedef struct aws_crt_input_stream_impl {
     py_stream_vtable *vtable;
-    /* Weak reference proxy to python self. */
-    PyObject *self_proxy;
+    _Bool is_end_of_stream;
 } aws_crt_input_stream_impl;
 
 static int s_py_stream_seek(void *user_data, int64_t offset, aws_crt_input_stream_seek_basis basis) {
     aws_crt_input_stream_impl *impl = user_data;
     py_stream_vtable *vtable = impl->vtable;
-    PyObject *self_proxy = impl->self_proxy;
-    PyObject *args = PyTuple_Pack(3, self_proxy, offset, basis);
+    PyObject *args = Py_BuildValue("(Li)", offset, basis);
     PyObject_Call(vtable->seek, args, NULL);
+    impl->is_end_of_stream = 0;
     return 1;
 }
 
 static int s_py_stream_read(void *user_data, uint8_t *dest, size_t dest_length) {
     aws_crt_input_stream_impl *impl = user_data;
     py_stream_vtable *vtable = impl->vtable;
-    PyObject *self_proxy = impl->self_proxy;
-    PyObject *args = PyTuple_Pack(2, self_proxy, dest, dest_length);
-    PyObject_Call(vtable->read, args, NULL);
+
+    PyObject *mem_view = PyMemoryView_FromMemory((char *)dest, dest_length, PyBUF_WRITE);
+
+    PyObject *args = Py_BuildValue("(O)", mem_view);
+    PyObject *ret = PyObject_Call(vtable->read, args, NULL);
+    
+    Py_ssize_t bytes_read = 0;
+    if (ret != Py_None) {
+        bytes_read = PyLong_AsSsize_t(ret);
+        if (bytes_read == -1 && PyErr_Occurred()) {
+            return 0;
+        }
+
+        if (bytes_read < 0) {
+            return 0;
+        }
+
+        if (bytes_read == 0) {
+            impl->is_end_of_stream = 1;
+        }
+    }
+
+    Py_XDECREF(mem_view);
+
     return 1;
 }
 
 static int s_py_stream_get_length(void *user_data, int64_t *out_length) {
+    (void)out_length;
     aws_crt_input_stream_impl *impl = user_data;
     py_stream_vtable *vtable = impl->vtable;
-    PyObject *self_proxy = impl->self_proxy;
-    PyObject *args = PyTuple_Pack(2, self_proxy, out_length);
+    PyObject *args = Py_BuildValue("()");
     PyObject_Call(vtable->get_length, args, NULL);
+    // NOT IMPLEMENTED
     return 1;
 }
 
 static int s_py_stream_get_status(void *user_data, aws_crt_input_stream_status *out_status) {
-    (void) out_status;
-    printf("Im in native calling get status\n");
+    (void)out_status;
     aws_crt_input_stream_impl *impl = user_data;
     py_stream_vtable *vtable = impl->vtable;
-    PyObject *self_proxy = impl->self_proxy;
-    printf("right before tuple pack\n");
-    PyObject *args = Py_BuildValue("(O)", self_proxy);
-    printf("right before call method\n");
+    PyObject *args = Py_BuildValue("()");
     PyObject_Call(vtable->get_status, args, NULL);
+    out_status->is_valid = 1;
+    out_status->is_end_of_stream = impl->is_end_of_stream;
     return 1;
 }
 
 static void s_py_stream_destroy(void *user_data) {
     aws_crt_input_stream_impl *impl = user_data;
     py_stream_vtable *vtable = impl->vtable;
-    PyObject *self_proxy = impl->self_proxy;
-    PyObject *args = PyTuple_Pack(1, self_proxy);
+    PyObject *args = Py_BuildValue("()");
+
     PyObject_Call(vtable->destroy, args, NULL);
+    Py_XDECREF(vtable->seek);
+    Py_XDECREF(vtable->read);
+    Py_XDECREF(vtable->get_length);
+    Py_XDECREF(vtable->get_status);
+    Py_XDECREF(vtable->destroy);
 }
 
 static PyObject *method_aws_crt_input_stream_options_new(PyObject *self, PyObject *args) {
@@ -71,7 +95,6 @@ static PyObject *method_aws_crt_input_stream_options_new(PyObject *self, PyObjec
     aws_crt_input_stream_impl *impl = (aws_crt_input_stream_impl *) aws_crt_mem_calloc(1, sizeof(aws_crt_input_stream_impl));
     py_stream_vtable* vtable = (py_stream_vtable *) aws_crt_mem_calloc(1, sizeof(py_stream_vtable));
     impl->vtable = vtable;
-    impl->self_proxy = PyWeakref_NewProxy(self, NULL);
     PyObject *ret = PyCapsule_New(impl, "aws_crt_input_stream_impl *", NULL);
     return ret;
 }
@@ -97,6 +120,7 @@ static PyObject *method_aws_crt_input_stream_options_set_seek(PyObject *self, Py
     aws_crt_input_stream_impl * c;
     c = (aws_crt_input_stream_impl *) PyCapsule_GetPointer(a, "aws_crt_input_stream_impl *");
     c->vtable->seek = b;
+    Py_INCREF(b);
 
     Py_RETURN_NONE;
 }
@@ -122,6 +146,8 @@ static PyObject *method_aws_crt_input_stream_options_set_read(PyObject *self, Py
     aws_crt_input_stream_impl * c;
     c = (aws_crt_input_stream_impl *) PyCapsule_GetPointer(a, "aws_crt_input_stream_impl *");
     c->vtable->read = b;
+    Py_INCREF(b);
+
     Py_RETURN_NONE;
 }
 
@@ -146,6 +172,8 @@ static PyObject *method_aws_crt_input_stream_options_set_get_status(PyObject *se
     aws_crt_input_stream_impl * c;
     c = (aws_crt_input_stream_impl *) PyCapsule_GetPointer(a, "aws_crt_input_stream_impl *");
     c->vtable->get_status = b;
+    Py_INCREF(b);
+
     Py_RETURN_NONE;
 }
 
@@ -170,6 +198,8 @@ static PyObject *method_aws_crt_input_stream_options_set_get_length(PyObject *se
     aws_crt_input_stream_impl * c;
     c = (aws_crt_input_stream_impl *) PyCapsule_GetPointer(a, "aws_crt_input_stream_impl *");
     c->vtable->get_length = b;
+    Py_INCREF(b);
+
     Py_RETURN_NONE;
 }
 
@@ -194,6 +224,8 @@ static PyObject *method_aws_crt_input_stream_options_set_destroy(PyObject *self,
     aws_crt_input_stream_impl * c;
     c = (aws_crt_input_stream_impl *) PyCapsule_GetPointer(a, "aws_crt_input_stream_impl *");
     c->vtable->destroy = b;
+    Py_INCREF(b);
+
     Py_RETURN_NONE;
 }
 
@@ -280,11 +312,25 @@ static PyObject *method_test_io(PyObject *self, PyObject *args) {
     aws_crt_input_stream *b;
     b = (aws_crt_input_stream *) PyCapsule_GetPointer(a, "aws_crt_input_stream *");
     aws_crt_input_stream_status *c = aws_crt_mem_calloc(1, sizeof(aws_crt_input_stream_status));
-    int status = aws_crt_input_stream_get_status(b, c);
-    printf("%d\n", status);
+    aws_crt_input_stream_get_status(b, c);
     printf("%d\n", c->is_end_of_stream);
     printf("%d\n", c->is_valid);
 
+    uint8_t *d;
+    d = aws_crt_mem_calloc(1, 4 * sizeof(char));
+    aws_crt_input_stream_read(b, d, 4);
+    printf("buffer from c: %s\n", d);
+    aws_crt_input_stream_read(b, d, 4);
+    printf("buffer from c: %s\n", d);
+    aws_crt_input_stream_read(b, d, 4);
+    printf("buffer from c: %s\n", d);
+    aws_crt_input_stream_read(b, d, 4);
+    printf("buffer from c: %s\n", d);
+    aws_crt_input_stream_read(b, d, 4);
+    printf("buffer from c: %s\n", d);
+    aws_crt_input_stream_read(b, d, 4);
+    printf("buffer from c: %s\n", d);
+    
     Py_RETURN_NONE;
 }
 
